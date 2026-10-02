@@ -6,7 +6,10 @@ const nextConfig = {
   output: process.env.NEXT_OUTPUT_MODE,
   poweredByHeader: false,
   productionBrowserSourceMaps: false,
-  outputFileTracingRoot: process.env.NEXT_OUTPUT_MODE ? path.join(__dirname, '../') : '/',
+  outputFileTracingRoot: process.env.NEXT_OUTPUT_MODE ? path.join(__dirname, '../') : __dirname,
+  // Keep Prisma as an external (non-bundled) server package so its generated
+  // client + query engine are traced into the serverless function on Vercel.
+  serverExternalPackages: ['@prisma/client', 'prisma'],
   typescript: {
     ignoreBuildErrors: true,
   },
