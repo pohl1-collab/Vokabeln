@@ -2,10 +2,56 @@ export const dynamic = 'force-dynamic';
 import { auth } from '@/auth';
 import { NextResponse } from 'next/server';
 
+// Extrahiert ein Vokabel-Array aus einer beliebigen KI-Antwort (Array, Objekt
+// mit Array-Feld, oder JSON-Array irgendwo im Text).
+function extractVocabs(content: string): any[] {
+  const text = (content ?? '').trim();
+  if (!text) return [];
+  // 1) direkter Parse
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === 'object') {
+      const direct = parsed.vocabularies ?? parsed.words ?? parsed.vocab ?? parsed.vocabs;
+      if (Array.isArray(direct)) return direct;
+      for (const v of Object.values(parsed)) {
+        if (Array.isArray(v)) return v as any[];
+      }
+    }
+  } catch {
+    // ignorieren, Fallback unten
+  }
+  // 2) JSON-Array aus Text herausziehen (z.B. falls Markdown-Codeblock)
+  const match = text.match(/\[[\s\S]*\]/);
+  if (match) {
+    try {
+      const arr = JSON.parse(match[0]);
+      if (Array.isArray(arr)) return arr;
+    } catch {
+      // ignorieren
+    }
+  }
+  return [];
+}
+
 export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: 'Nicht autorisiert' }, { status: 401 });
+  }
+
+  // Vorab-Check: Ohne API-Schlüssel kann die KI-Bilderkennung nicht laufen.
+  // Klare Meldung statt eines verschluckten Fehlers ("Bild analysiert" ohne Ergebnis).
+  const apiKey = process.env.ABACUSAI_API_KEY;
+  if (!apiKey) {
+    console.error('ABACUSAI_API_KEY fehlt – KI-Bilderkennung nicht konfiguriert.');
+    return NextResponse.json(
+      {
+        error:
+          'Die KI-Bilderkennung ist noch nicht eingerichtet. Es fehlt der API-Schlüssel (ABACUSAI_API_KEY) in den Projekt-Einstellungen. Bitte trage ihn in den Einstellungen (Environment Variables) ein und starte einen neuen Deploy.',
+      },
+      { status: 503 },
+    );
   }
 
   try {
@@ -45,112 +91,54 @@ Antwort NUR als reines JSON, keine weiteren Erklärungen.`,
       },
     ];
 
-    const llmResponse = await fetch('https://apps.abacus.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.ABACUSAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'gpt-5.4-mini',
-        messages,
-        stream: true,
-        max_tokens: 4000,
-        response_format: { type: 'json_object' },
-      }),
-    });
+    let llmResponse: Response;
+    try {
+      llmResponse = await fetch('https://apps.abacus.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-5.4-mini',
+          messages,
+          stream: false,
+          max_tokens: 4000,
+        }),
+      });
+    } catch (netErr: any) {
+      console.error('LLM Netzwerkfehler:', netErr);
+      return NextResponse.json(
+        { error: 'Die KI-Analyse ist nicht erreichbar. Bitte versuche es später erneut.' },
+        { status: 502 },
+      );
+    }
 
     if (!llmResponse.ok) {
-      const errText = await llmResponse.text();
-      console.error('LLM API error:', errText);
-      return NextResponse.json({ error: 'KI-Analyse fehlgeschlagen' }, { status: 502 });
+      const errText = await llmResponse.text().catch(() => '');
+      console.error('LLM API error:', llmResponse.status, errText);
+      // Fehler NICHT verschlucken: spezifische, verständliche Meldung je nach Ursache.
+      let msg = 'Die KI-Analyse ist fehlgeschlagen.';
+      if (llmResponse.status === 401 || llmResponse.status === 403 || /invalid api key/i.test(errText)) {
+        msg =
+          'Die KI-Analyse wurde abgelehnt (ungültiger oder fehlender API-Schlüssel). Bitte prüfe den Schlüssel ABACUSAI_API_KEY in den Projekt-Einstellungen.';
+      } else if (llmResponse.status === 429) {
+        msg = 'Die KI-Analyse ist derzeit überlastet (Limit erreicht). Bitte versuche es in ein paar Minuten erneut.';
+      }
+      return NextResponse.json({ error: msg }, { status: 502 });
     }
 
-    const reader = llmResponse.body?.getReader();
-    if (!reader) {
-      return NextResponse.json({ error: 'Kein Stream verfügbar' }, { status: 502 });
-    }
+    const data = await llmResponse.json().catch(() => null);
+    const content: string = data?.choices?.[0]?.message?.content ?? '';
+    const vocabs = extractVocabs(content);
 
-    const decoder = new TextDecoder();
+    // Ergebnis als Event-Stream zurückgeben (Frontend erwartet SSE mit status "completed").
     const encoder = new TextEncoder();
-    let buffer = '';
-    let partialRead = '';
-
     const stream = new ReadableStream({
-      async start(controller) {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            partialRead += decoder.decode(value, { stream: true });
-            const lines = partialRead.split('\n');
-            partialRead = lines.pop() ?? '';
-            for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                const data = line.slice(6);
-                if (data === '[DONE]') {
-                  // Parse the buffer
-                  let vocabs: any[] = [];
-                  try {
-                    const parsed = JSON.parse(buffer);
-                    if (Array.isArray(parsed)) {
-                      vocabs = parsed;
-                    } else if (parsed?.vocabularies || parsed?.words || parsed?.vocab) {
-                      vocabs = parsed.vocabularies ?? parsed.words ?? parsed.vocab ?? [];
-                    } else {
-                      // Try to find an array in the parsed object
-                      const vals = Object.values(parsed);
-                      for (const v of vals) {
-                        if (Array.isArray(v)) { vocabs = v as any[]; break; }
-                      }
-                    }
-                  } catch {
-                    // try to extract JSON array from buffer
-                    const match = buffer.match(/\[.*\]/s);
-                    if (match) {
-                      try { vocabs = JSON.parse(match[0]); } catch { vocabs = []; }
-                    }
-                  }
-                  const finalData = JSON.stringify({ status: 'completed', result: vocabs });
-                  controller.enqueue(encoder.encode(`data: ${finalData}\n\n`));
-                  controller.close();
-                  return;
-                }
-                try {
-                  const parsed = JSON.parse(data);
-                  const content = parsed?.choices?.[0]?.delta?.content ?? '';
-                  buffer += content;
-                  const progressData = JSON.stringify({ status: 'processing', message: 'Analysiere Bild...' });
-                  controller.enqueue(encoder.encode(`data: ${progressData}\n\n`));
-                } catch {
-                  // skip invalid JSON
-                }
-              }
-            }
-          }
-          // If we get here without [DONE], try to parse buffer
-          if (buffer) {
-            let vocabs: any[] = [];
-            try {
-              const parsed = JSON.parse(buffer);
-              if (Array.isArray(parsed)) vocabs = parsed;
-              else {
-                const vals = Object.values(parsed ?? {});
-                for (const v of vals) {
-                  if (Array.isArray(v)) { vocabs = v as any[]; break; }
-                }
-              }
-            } catch { /* ignore */ }
-            const finalData = JSON.stringify({ status: 'completed', result: vocabs });
-            controller.enqueue(encoder.encode(`data: ${finalData}\n\n`));
-          }
-          controller.close();
-        } catch (error: any) {
-          console.error('Stream error:', error);
-          const errData = JSON.stringify({ status: 'error', message: error?.message ?? 'Stream-Fehler' });
-          controller.enqueue(encoder.encode(`data: ${errData}\n\n`));
-          controller.close();
-        }
+      start(controller) {
+        const finalData = JSON.stringify({ status: 'completed', result: vocabs });
+        controller.enqueue(encoder.encode(`data: ${finalData}\n\n`));
+        controller.close();
       },
     });
 
@@ -163,6 +151,6 @@ Antwort NUR als reines JSON, keine weiteren Erklärungen.`,
     });
   } catch (err: any) {
     console.error('Upload error:', err);
-    return NextResponse.json({ error: 'Upload fehlgeschlagen' }, { status: 500 });
+    return NextResponse.json({ error: 'Upload fehlgeschlagen: ' + (err?.message ?? 'Unbekannter Fehler') }, { status: 500 });
   }
 }
