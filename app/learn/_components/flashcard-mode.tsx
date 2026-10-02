@@ -5,7 +5,7 @@ import { ThumbsUp, ThumbsDown, ArrowLeft, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Card, CardContent } from '@/components/ui/card';
-import { toast } from 'sonner';
+import { useLearnQueue } from './use-learn-queue';
 
 interface Props {
   vocabs: { id: string; germanWord: string; englishWord: string }[];
@@ -15,40 +15,26 @@ interface Props {
 }
 
 export function FlashcardMode({ vocabs, sessionId, direction, onFinish }: Props) {
-  const [index, setIndex] = useState(0);
+  const {
+    current, total, remaining, repeatsPending, isRepeat,
+    mastered, firstTryCorrect, done, step, answer,
+  } = useLearnQueue(vocabs, sessionId);
   const [flipped, setFlipped] = useState(false);
-  const [correct, setCorrect] = useState(0);
-  const [done, setDone] = useState(false);
 
-  const total = vocabs?.length ?? 0;
-  const current = vocabs?.[index];
   const front = direction === 'de-en' ? current?.germanWord : current?.englishWord;
   const back = direction === 'de-en' ? current?.englishWord : current?.germanWord;
 
-  const reportAndNext = async (wasCorrect: boolean) => {
-    try {
-      await fetch('/api/learn/progress', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, vocabId: current?.id, correct: wasCorrect }),
-      });
-    } catch { /* ignore */ }
-
-    if (wasCorrect) setCorrect((c) => c + 1);
+  const handleAnswer = (wasCorrect: boolean) => {
     setFlipped(false);
-    if (index + 1 >= total) {
-      setDone(true);
-    } else {
-      setIndex((i) => i + 1);
-    }
+    answer(wasCorrect);
   };
 
-  if (done) {
+  if (done || !current) {
     return (
       <div className="flex flex-col items-center justify-center py-16 space-y-6">
-        <div className="text-6xl font-display font-bold text-primary">{correct}/{total}</div>
+        <div className="text-6xl font-display font-bold text-primary">{firstTryCorrect}/{total}</div>
         <p className="text-xl text-muted-foreground">Karteikarten abgeschlossen!</p>
-        <p className="text-muted-foreground">Trefferquote: {total > 0 ? Math.round((correct / total) * 100) : 0}%</p>
+        <p className="text-muted-foreground">Auf Anhieb gewusst: {total > 0 ? Math.round((firstTryCorrect / total) * 100) : 0}%</p>
         <Button onClick={onFinish} className="gap-2"><ArrowLeft className="h-4 w-4" /> Zurück</Button>
       </div>
     );
@@ -58,21 +44,34 @@ export function FlashcardMode({ vocabs, sessionId, direction, onFinish }: Props)
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <Button variant="ghost" size="sm" onClick={onFinish} className="gap-1">
-          <ArrowLeft className="h-4 w-4" /> Abbrechen
+          <ArrowLeft className="h-4 w-4" /> Beenden
         </Button>
-        <span className="text-sm text-muted-foreground">{index + 1} / {total}</span>
+        <span className="text-sm text-muted-foreground">Noch {remaining} {remaining === 1 ? 'Karte' : 'Karten'}</span>
       </div>
-      <Progress value={total > 0 ? ((index) / total) * 100 : 0} />
+      <Progress value={total > 0 ? (mastered / total) * 100 : 0} />
+
+      {repeatsPending > 0 && (
+        <p className="text-center text-xs text-muted-foreground">
+          {mastered} von {total} gemeistert · {repeatsPending} zur Wiederholung
+        </p>
+      )}
 
       <div className="flex justify-center">
         <AnimatePresence mode="wait">
           <motion.div
-            key={index}
+            key={step}
             initial={{ opacity: 0, x: 50 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -50 }}
             className="w-full max-w-md"
           >
+            {isRepeat && (
+              <div className="mb-3 flex justify-center">
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700">
+                  <RotateCcw className="h-3 w-3" /> Wiederholung
+                </span>
+              </div>
+            )}
             <Card
               className="cursor-pointer min-h-[250px] flex items-center justify-center"
               style={{ boxShadow: 'var(--shadow-lg)' }}
@@ -108,14 +107,14 @@ export function FlashcardMode({ vocabs, sessionId, direction, onFinish }: Props)
             size="lg"
             variant="outline"
             className="gap-2 border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground"
-            onClick={() => reportAndNext(false)}
+            onClick={() => handleAnswer(false)}
           >
             <ThumbsDown className="h-5 w-5" /> Nicht gewusst
           </Button>
           <Button
             size="lg"
             className="gap-2 bg-green-600 hover:bg-green-700 text-white"
-            onClick={() => reportAndNext(true)}
+            onClick={() => handleAnswer(true)}
           >
             <ThumbsUp className="h-5 w-5" /> Gewusst
           </Button>

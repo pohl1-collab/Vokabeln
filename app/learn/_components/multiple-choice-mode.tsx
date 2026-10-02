@@ -1,10 +1,11 @@
 'use client';
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Check, X } from 'lucide-react';
+import { ArrowLeft, Check, X, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Card, CardContent } from '@/components/ui/card';
+import { useLearnQueue } from './use-learn-queue';
 
 interface Props {
   vocabs: { id: string; germanWord: string; englishWord: string }[];
@@ -23,53 +24,39 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 export function MultipleChoiceMode({ vocabs, sessionId, direction, onFinish }: Props) {
-  const [index, setIndex] = useState(0);
+  const {
+    current, total, remaining, repeatsPending, isRepeat,
+    mastered, firstTryCorrect, done, step, answer,
+  } = useLearnQueue(vocabs, sessionId);
   const [selected, setSelected] = useState<string | null>(null);
-  const [correct, setCorrect] = useState(0);
-  const [done, setDone] = useState(false);
 
-  const total = vocabs?.length ?? 0;
-  const current = vocabs?.[index];
   const question = direction === 'de-en' ? current?.germanWord : current?.englishWord;
-  const answer = direction === 'de-en' ? current?.englishWord : current?.germanWord;
+  const correctAnswer = direction === 'de-en' ? current?.englishWord : current?.germanWord;
 
   const options = useMemo(() => {
     if (!current) return [];
     const pool = vocabs.filter((v) => v.id !== current.id);
     const wrongOnes = shuffle(pool).slice(0, 3).map((v) => direction === 'de-en' ? v.englishWord : v.germanWord);
-    return shuffle([answer ?? '', ...wrongOnes]);
+    return shuffle([correctAnswer ?? '', ...wrongOnes]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [index, current?.id]);
+  }, [step, current?.id]);
 
-  const handleSelect = async (opt: string) => {
+  const handleSelect = (opt: string) => {
     if (selected) return;
     setSelected(opt);
-    const isCorrect = opt === answer;
-    if (isCorrect) setCorrect((c) => c + 1);
-    try {
-      await fetch('/api/learn/progress', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, vocabId: current?.id, correct: isCorrect }),
-      });
-    } catch { /* ignore */ }
-
+    const isCorrect = opt === correctAnswer;
     setTimeout(() => {
       setSelected(null);
-      if (index + 1 >= total) {
-        setDone(true);
-      } else {
-        setIndex((i) => i + 1);
-      }
+      answer(isCorrect);
     }, 1200);
   };
 
-  if (done) {
+  if (done || !current) {
     return (
       <div className="flex flex-col items-center justify-center py-16 space-y-6">
-        <div className="text-6xl font-display font-bold text-primary">{correct}/{total}</div>
+        <div className="text-6xl font-display font-bold text-primary">{firstTryCorrect}/{total}</div>
         <p className="text-xl text-muted-foreground">Multiple Choice abgeschlossen!</p>
-        <p className="text-muted-foreground">Trefferquote: {total > 0 ? Math.round((correct / total) * 100) : 0}%</p>
+        <p className="text-muted-foreground">Auf Anhieb gewusst: {total > 0 ? Math.round((firstTryCorrect / total) * 100) : 0}%</p>
         <Button onClick={onFinish} className="gap-2"><ArrowLeft className="h-4 w-4" /> Zurück</Button>
       </div>
     );
@@ -79,14 +66,27 @@ export function MultipleChoiceMode({ vocabs, sessionId, direction, onFinish }: P
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <Button variant="ghost" size="sm" onClick={onFinish} className="gap-1">
-          <ArrowLeft className="h-4 w-4" /> Abbrechen
+          <ArrowLeft className="h-4 w-4" /> Beenden
         </Button>
-        <span className="text-sm text-muted-foreground">{index + 1} / {total}</span>
+        <span className="text-sm text-muted-foreground">Noch {remaining} {remaining === 1 ? 'Karte' : 'Karten'}</span>
       </div>
-      <Progress value={total > 0 ? ((index) / total) * 100 : 0} />
+      <Progress value={total > 0 ? (mastered / total) * 100 : 0} />
+
+      {repeatsPending > 0 && (
+        <p className="text-center text-xs text-muted-foreground">
+          {mastered} von {total} gemeistert · {repeatsPending} zur Wiederholung
+        </p>
+      )}
 
       <AnimatePresence mode="wait">
-        <motion.div key={index} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
+        <motion.div key={step} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
+          {isRepeat && (
+            <div className="mb-3 flex justify-center">
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700">
+                <RotateCcw className="h-3 w-3" /> Wiederholung
+              </span>
+            </div>
+          )}
           <Card className="text-center" style={{ boxShadow: 'var(--shadow-lg)' }}>
             <CardContent className="p-8">
               <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">
@@ -97,7 +97,7 @@ export function MultipleChoiceMode({ vocabs, sessionId, direction, onFinish }: P
                 {options.map((opt, i) => {
                   let variant: 'outline' | 'default' | 'destructive' = 'outline';
                   if (selected) {
-                    if (opt === answer) variant = 'default';
+                    if (opt === correctAnswer) variant = 'default';
                     else if (opt === selected) variant = 'destructive';
                   }
                   return (
@@ -109,8 +109,8 @@ export function MultipleChoiceMode({ vocabs, sessionId, direction, onFinish }: P
                       onClick={() => handleSelect(opt)}
                       disabled={!!selected}
                     >
-                      {selected && opt === answer && <Check className="h-4 w-4 shrink-0" />}
-                      {selected && opt === selected && opt !== answer && <X className="h-4 w-4 shrink-0" />}
+                      {selected && opt === correctAnswer && <Check className="h-4 w-4 shrink-0" />}
+                      {selected && opt === selected && opt !== correctAnswer && <X className="h-4 w-4 shrink-0" />}
                       <span className="truncate">{opt}</span>
                     </Button>
                   );
