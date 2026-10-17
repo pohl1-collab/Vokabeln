@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 import { auth } from '@/auth';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { normalizePair } from '@/lib/language';
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -65,8 +66,20 @@ export async function POST(request: Request) {
       },
     });
 
-    // Shuffle vocabs
-    const shuffled = [...vocabs].sort(() => Math.random() - 0.5);
+    // Vertauschte Einträge (z.B. englischer Text im Feld "Deutsch" aus älteren
+    // Foto-Importen) korrigieren, damit die Lernrichtung immer stimmt:
+    // de-en => Deutsch vorne, en-de => Englisch vorne.
+    const normalized = vocabs.map((v: any) => {
+      const pair = normalizePair({ german: v.germanWord ?? '', english: v.englishWord ?? '' });
+      return { ...v, germanWord: pair.german, englishWord: pair.english };
+    });
+
+    // Fisher-Yates-Shuffle (gleichmäßig verteilt)
+    const shuffled = [...normalized];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
 
     return NextResponse.json({
       sessionId: learningSession.id,

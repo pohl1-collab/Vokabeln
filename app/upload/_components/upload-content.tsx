@@ -1,6 +1,6 @@
 'use client';
 import { useState, useRef, useCallback } from 'react';
-import { Camera, Upload, Image as ImageIcon, Loader2, Check, X, Plus, Save, Trash2 } from 'lucide-react';
+import { Camera, Upload, Image as ImageIcon, Loader2, Check, X, Plus, Save, Trash2, Languages, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,6 +19,7 @@ export function UploadContent() {
   const [vocabs, setVocabs] = useState<VocabItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [translation, setTranslation] = useState<{ original: string; german: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
@@ -27,6 +28,7 @@ export function UploadContent() {
     setFile(selectedFile);
     setSaved(false);
     setVocabs([]);
+    setTranslation(null);
     const reader = new FileReader();
     reader.onload = (e) => setPreview(e.target?.result as string ?? null);
     reader.readAsDataURL(selectedFile);
@@ -36,6 +38,7 @@ export function UploadContent() {
     if (!file) return;
     setAnalyzing(true);
     setVocabs([]);
+    setTranslation(null);
     setSaved(false);
 
     try {
@@ -77,14 +80,18 @@ export function UploadContent() {
               const parsed = JSON.parse(data);
               if (parsed?.status === 'completed') {
                 const result = parsed?.result;
+                const germanText = String(parsed?.germanTranslation ?? '').trim();
+                if (germanText) {
+                  setTranslation({ original: String(parsed?.originalText ?? '').trim(), german: germanText });
+                }
                 if (Array.isArray(result) && result.length > 0) {
                   setVocabs(result.map((v: any) => ({
                     german: v?.german ?? v?.deutsch ?? '',
                     english: v?.english ?? v?.englisch ?? '',
                   })).filter((v: VocabItem) => v.german || v.english));
                   toast.success(`${result.length} Vokabeln erkannt!`);
-                } else {
-                  toast.info('Keine Vokabeln im Bild erkannt.');
+                } else if (!germanText) {
+                  toast.info('Kein Text im Bild erkannt.');
                 }
               } else if (parsed?.status === 'error') {
                 toast.error(parsed?.message ?? 'Fehler bei der Analyse');
@@ -151,7 +158,18 @@ export function UploadContent() {
     setFile(null);
     setPreview(null);
     setVocabs([]);
+    setTranslation(null);
     setSaved(false);
+  };
+
+  const copyTranslation = async () => {
+    if (!translation) return;
+    try {
+      await navigator.clipboard.writeText(translation.german);
+      toast.success('Übersetzung kopiert');
+    } catch {
+      toast.error('Kopieren nicht möglich');
+    }
   };
 
   return (
@@ -215,6 +233,33 @@ export function UploadContent() {
           </CardContent>
         </Card>
       </FadeIn>
+
+      {/* Deutsche Übersetzung des erkannten Textes */}
+      {translation && (
+        <FadeIn>
+          <Card style={{ boxShadow: 'var(--shadow-md)' }}>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="font-display flex items-center gap-2">
+                <Languages className="h-5 w-5" />
+                Deutsche Übersetzung
+              </CardTitle>
+              <Button variant="outline" size="sm" onClick={copyTranslation} className="gap-1">
+                <Copy className="h-3 w-3" />
+                Kopieren
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="whitespace-pre-line text-lg leading-relaxed">{translation.german}</p>
+              {translation.original && translation.original !== translation.german && (
+                <div className="rounded-lg bg-muted/50 p-3">
+                  <p className="text-xs text-muted-foreground mb-1 uppercase tracking-wider">Erkannter Originaltext</p>
+                  <p className="whitespace-pre-line text-sm text-muted-foreground">{translation.original}</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </FadeIn>
+      )}
 
       {/* Extracted Vocabs */}
       {vocabs.length > 0 && (

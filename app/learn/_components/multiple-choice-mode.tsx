@@ -39,7 +39,7 @@ export function MultipleChoiceMode({ vocabs, sessionId, direction, onFinish }: P
     const wrongOnes = shuffle(pool).slice(0, 3).map((v) => direction === 'de-en' ? v.englishWord : v.germanWord);
     return shuffle([correctAnswer ?? '', ...wrongOnes]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, current?.id]);
+  }, [step, current?.id, direction]);
 
   const handleSelect = (opt: string) => {
     if (selected) return;

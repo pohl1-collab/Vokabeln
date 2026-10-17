@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, ArrowRight, Check, X, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -40,6 +40,13 @@ export function WritingMode({ vocabs, sessionId, direction, onFinish }: Props) {
   const [input, setInput] = useState('');
   const [checked, setChecked] = useState(false);
   const [wasCorrect, setWasCorrect] = useState(false);
+
+  // Beim Umdrehen der Lernrichtung die aktuelle Eingabe zurücksetzen.
+  useEffect(() => {
+    setInput('');
+    setChecked(false);
+    setWasCorrect(false);
+  }, [direction]);
 
   const question = direction === 'de-en' ? current?.germanWord : current?.englishWord;
   const correctAnswer = direction === 'de-en' ? current?.englishWord : current?.germanWord;

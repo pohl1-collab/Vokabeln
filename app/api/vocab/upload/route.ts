@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 import { auth } from '@/auth';
 import { NextResponse } from 'next/server';
+import { normalizePair } from '@/lib/language';
 
 // Extrahiert ein Vokabel-Array aus einer beliebigen KI-Antwort (Array, Objekt
 // mit Array-Feld, oder JSON-Array irgendwo im Text).
@@ -32,6 +33,27 @@ function extractVocabs(content: string): any[] {
     }
   }
   return [];
+}
+
+// Liest die Gesamt-Übersetzung (und den Originaltext) aus der KI-Antwort, falls vorhanden.
+function extractTranslation(content: string): { originalText: string; germanTranslation: string } {
+  const text = (content ?? '').trim();
+  const candidates = [text, text.match(/\{[\s\S]*\}/)?.[0] ?? ''];
+  for (const c of candidates) {
+    if (!c) continue;
+    try {
+      const parsed = JSON.parse(c);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return {
+          originalText: String(parsed.originalText ?? parsed.original ?? ''),
+          germanTranslation: String(parsed.germanTranslation ?? parsed.translation ?? parsed.deutsch ?? ''),
+        };
+      }
+    } catch {
+      // ignorieren
+    }
+  }
+  return { originalText: '', germanTranslation: '' };
 }
 
 export async function POST(request: Request) {
@@ -75,17 +97,22 @@ export async function POST(request: Request) {
           },
           {
             type: 'text' as const,
-            text: `Du bist ein Vokabel-Extractor. Analysiere dieses Bild und extrahiere alle deutschen und englischen Wörter/Phrasen daraus.
+            text: `Du bist ein Vokabel- und Übersetzungs-Assistent für deutschsprachige Lernende. Lies den GESAMTEN Text auf diesem Bild (OCR) – einzelne Wörter, Wortpaare UND ganze Sätze.
 
-Wenn du deutsche Wörter findest, übersetze sie ins Englische.
-Wenn du englische Wörter findest, übersetze sie ins Deutsche.
-Wenn du Wortpaare (Deutsch-Englisch) findest, behalte die Zuordnung bei.
+Regeln:
+1. "originalText": der erkannte Text genau so, wie er auf dem Bild steht (Zeilenumbrüche mit \\n).
+2. "germanTranslation": der komplette erkannte Text als natürliche deutsche Übersetzung (ganze Sätze vollständig übersetzen, nicht Wort für Wort). Ist der Text bereits Deutsch, gib ihn unverändert zurück.
+3. "vocabularies": Liste von Lernpaaren. Jedes Wort, jede Phrase und jeder ganze Satz wird ein eigener Eintrag.
+   - Das Feld "german" enthält IMMER den deutschen Text, das Feld "english" IMMER den englischen Text.
+   - Steht auf dem Bild Englisch (oder eine andere Fremdsprache), kommt der Originaltext ins Feld "english" und die deutsche Übersetzung ins Feld "german".
+   - Steht auf dem Bild Deutsch, kommt der Originaltext ins Feld "german" und die englische Übersetzung ins Feld "english".
+   - Sind bereits Wortpaare (Deutsch–Englisch) abgebildet, behalte die Zuordnung bei – achte aber darauf, dass Deutsch in "german" und Englisch in "english" landet.
+   - Ganze Sätze NICHT in einzelne Wörter zerlegen, sondern als vollständigen Satz übersetzen.
 
-Antworte NUR als JSON-Array mit Objekten, OHNE Code-Blöcke oder Markdown:
-[{"german": "deutsches Wort", "english": "english word"}, ...]
+Antworte NUR mit reinem JSON (ohne Code-Blöcke, ohne Markdown, ohne Erklärungen) in genau diesem Format:
+{"originalText": "...", "germanTranslation": "...", "vocabularies": [{"german": "deutscher Text", "english": "english text"}]}
 
-Wenn keine Vokabeln erkannt werden, antworte mit einem leeren Array: []
-Antwort NUR als reines JSON, keine weiteren Erklärungen.`,
+Wenn kein Text erkannt wird: {"originalText": "", "germanTranslation": "", "vocabularies": []}`,
           },
         ],
       },
@@ -130,13 +157,21 @@ Antwort NUR als reines JSON, keine weiteren Erklärungen.`,
 
     const data = await llmResponse.json().catch(() => null);
     const content: string = data?.choices?.[0]?.message?.content ?? '';
-    const vocabs = extractVocabs(content);
+    // Felder vereinheitlichen und vertauschte Paare (Englisch im Feld "german") korrigieren.
+    const vocabs = extractVocabs(content)
+      .map((v: any) => ({
+        german: String(v?.german ?? v?.deutsch ?? '').trim(),
+        english: String(v?.english ?? v?.englisch ?? '').trim(),
+      }))
+      .filter((v) => v.german || v.english)
+      .map(normalizePair);
+    const { originalText, germanTranslation } = extractTranslation(content);
 
     // Ergebnis als Event-Stream zurückgeben (Frontend erwartet SSE mit status "completed").
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       start(controller) {
-        const finalData = JSON.stringify({ status: 'completed', result: vocabs });
+        const finalData = JSON.stringify({ status: 'completed', result: vocabs, originalText, germanTranslation });
         controller.enqueue(encoder.encode(`data: ${finalData}\n\n`));
         controller.close();
       },
