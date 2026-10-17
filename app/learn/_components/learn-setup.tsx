@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { GraduationCap, BookOpen, CheckCircle2, PenLine, RotateCcw, ArrowRight } from 'lucide-react';
+import { GraduationCap, BookOpen, CheckCircle2, PenLine, RotateCcw, ArrowRight, ArrowLeftRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -24,10 +24,36 @@ interface VocabItem {
   englishWord: string;
 }
 
+type Direction = 'de-en' | 'en-de';
+
+// Gut sichtbarer Pfeil-Button zum schnellen Umdrehen der Lernrichtung.
+function DirectionSwitch({ direction, onToggle }: { direction: Direction; onToggle: () => void }) {
+  const from = direction === 'de-en' ? 'Deutsch' : 'Englisch';
+  const to = direction === 'de-en' ? 'Englisch' : 'Deutsch';
+  return (
+    <div className="flex items-center justify-center gap-3">
+      <span className="w-20 text-right text-sm font-medium">{from}</span>
+      <Button
+        type="button"
+        size="icon"
+        onClick={onToggle}
+        aria-label={`Lernrichtung umdrehen (jetzt ${from} → ${to})`}
+        title="Lernrichtung umdrehen"
+        className="h-11 w-11 rounded-full"
+        style={{ boxShadow: 'var(--shadow-md)' }}
+      >
+        <ArrowLeftRight className="h-5 w-5" />
+      </Button>
+      <span className="w-20 text-left text-sm font-medium">{to}</span>
+    </div>
+  );
+}
+
 export function LearnSetup() {
   const [step, setStep] = useState<'setup' | 'learning'>('setup');
   const [selectedMode, setSelectedMode] = useState('flashcard');
-  const [direction, setDirection] = useState<'de-en' | 'en-de'>('de-en');
+  const [direction, setDirection] = useState<Direction>('de-en');
+  const toggleDirection = () => setDirection((d) => (d === 'de-en' ? 'en-de' : 'de-en'));
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [sessionId, setSessionId] = useState('');
@@ -77,13 +103,19 @@ export function LearnSetup() {
 
   if (step === 'learning') {
     const modeProps = { vocabs, sessionId, direction, onFinish: handleFinish };
+    let modeView;
     switch (selectedMode) {
-      case 'flashcard': return <FlashcardMode {...modeProps} />;
-      case 'multiplechoice': return <MultipleChoiceMode {...modeProps} />;
-      case 'writing': return <WritingMode {...modeProps} />;
-      case 'spaced': return <SpacedMode {...modeProps} />;
-      default: return <FlashcardMode {...modeProps} />;
+      case 'multiplechoice': modeView = <MultipleChoiceMode {...modeProps} />; break;
+      case 'writing': modeView = <WritingMode {...modeProps} />; break;
+      case 'spaced': modeView = <SpacedMode {...modeProps} />; break;
+      default: modeView = <FlashcardMode {...modeProps} />;
     }
+    return (
+      <div className="space-y-4">
+        <DirectionSwitch direction={direction} onToggle={toggleDirection} />
+        {modeView}
+      </div>
+    );
   }
 
   return (
@@ -133,13 +165,24 @@ export function LearnSetup() {
             <CardTitle className="text-base">Lernrichtung</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex gap-3">
+            <div className="flex items-center gap-3">
               <Button
                 variant={direction === 'de-en' ? 'default' : 'outline'}
                 onClick={() => setDirection('de-en')}
                 className="flex-1"
               >
                 Deutsch → Englisch
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={toggleDirection}
+                aria-label="Lernrichtung umdrehen"
+                title="Lernrichtung umdrehen"
+                className="shrink-0 rounded-full"
+              >
+                <ArrowLeftRight className="h-5 w-5" />
               </Button>
               <Button
                 variant={direction === 'en-de' ? 'default' : 'outline'}

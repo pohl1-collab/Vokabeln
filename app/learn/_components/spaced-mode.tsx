@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, RotateCcw, Smile, Meh, Frown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -18,6 +18,9 @@ export function SpacedMode({ vocabs, sessionId, direction, onFinish }: Props) {
   const [flipped, setFlipped] = useState(false);
   const [correct, setCorrect] = useState(0);
   const [done, setDone] = useState(false);
+
+  // Beim Umdrehen der Lernrichtung die Karte wieder auf die Vorderseite drehen.
+  useEffect(() => { setFlipped(false); }, [direction]);
 
   const total = vocabs?.length ?? 0;
   const current = vocabs?.[index];

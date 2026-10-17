@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ThumbsUp, ThumbsDown, ArrowLeft, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,9 @@ export function FlashcardMode({ vocabs, sessionId, direction, onFinish }: Props)
     mastered, firstTryCorrect, done, step, answer,
   } = useLearnQueue(vocabs, sessionId);
   const [flipped, setFlipped] = useState(false);
+
+  // Beim Umdrehen der Lernrichtung die Karte wieder auf die Vorderseite drehen.
+  useEffect(() => { setFlipped(false); }, [direction]);
 
   const front = direction === 'de-en' ? current?.germanWord : current?.englishWord;
   const back = direction === 'de-en' ? current?.englishWord : current?.germanWord;
