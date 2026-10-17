@@ -95,3 +95,29 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Aktualisierung fehlgeschlagen' }, { status: 500 });
   }
 }
+
+
+// Tauscht Deutsch und Englisch eines Eintrags (z.B. wenn die KI die Sprachen
+// beim Import vertauscht hat). Body: { id }
+export async function PATCH(request: Request) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: 'Nicht autorisiert' }, { status: 401 });
+  }
+  const userId = (session.user as any).id;
+  try {
+    const body = await request.json();
+    const id = body?.id;
+    if (!id) return NextResponse.json({ error: 'ID fehlt' }, { status: 400 });
+    const vocab = await prisma.vocabulary.findFirst({ where: { id, userId } });
+    if (!vocab) return NextResponse.json({ error: 'Vokabel nicht gefunden' }, { status: 404 });
+    const updated = await prisma.vocabulary.update({
+      where: { id: vocab.id },
+      data: { germanWord: vocab.englishWord, englishWord: vocab.germanWord },
+    });
+    return NextResponse.json(updated);
+  } catch (err: any) {
+    console.error('Swap vocab error:', err);
+    return NextResponse.json({ error: 'Tauschen fehlgeschlagen' }, { status: 500 });
+  }
+}

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState, useCallback } from 'react';
-import { List, Plus, Trash2, Edit2, Check, X, Search, Calendar } from 'lucide-react';
+import { List, Plus, Trash2, Edit2, Check, X, Search, Calendar, ArrowLeftRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -53,6 +53,27 @@ export function VocabListContent() {
       toast.success('Vokabel gelöscht');
     } catch {
       toast.error('Löschen fehlgeschlagen');
+    }
+  };
+
+  // Deutsch und Englisch tauschen – sofort in der Liste (optimistisch), dann in der DB speichern.
+  const handleSwap = async (id: string) => {
+    const swap = () =>
+      setVocabs((prev) =>
+        prev.map((v) => (v.id === id ? { ...v, germanWord: v.englishWord, englishWord: v.germanWord } : v))
+      );
+    swap();
+    try {
+      const res = await fetch('/api/vocab', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success('Deutsch und Englisch getauscht');
+    } catch {
+      swap(); // zurückdrehen
+      toast.error('Tauschen fehlgeschlagen');
     }
   };
 
@@ -133,7 +154,7 @@ export function VocabListContent() {
               <div className="flex items-center gap-2">
                 <Input placeholder="Deutsch" value={newGerman} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewGerman(e.target.value)} className="flex-1" />
                 <span className="text-muted-foreground">↔</span>
-                <Input placeholder="English" value={newEnglish} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewEnglish(e.target.value)} className="flex-1" />
+                <Input placeholder="Englisch" value={newEnglish} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewEnglish(e.target.value)} className="flex-1" />
                 <Button size="icon" onClick={addVocab}><Check className="h-4 w-4" /></Button>
                 <Button size="icon" variant="ghost" onClick={() => setShowAdd(false)}><X className="h-4 w-4" /></Button>
               </div>
@@ -183,15 +204,21 @@ export function VocabListContent() {
         </Card>
       ) : (
         <Stagger staggerDelay={0.03}>
-          <div className="space-y-2">
+          <div className="flex items-center gap-3 px-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            <span className="flex-1">Deutsch</span>
+            <span className="shrink-0">↔</span>
+            <span className="flex-1">Englisch</span>
+            <span className="w-24 shrink-0" />
+          </div>
+          <div className="space-y-2 mt-2">
             {filtered.map((v) => (
               <StaggerItem key={v.id}>
                 <div className="flex items-center gap-3 rounded-lg bg-card px-4 py-3 transition-shadow hover:shadow-md" style={{ boxShadow: 'var(--shadow-sm)' }}>
                   {editingId === v.id ? (
                     <>
-                      <Input value={editGerman} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditGerman(e.target.value)} className="flex-1" />
+                      <Input placeholder="Deutsch" value={editGerman} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditGerman(e.target.value)} className="flex-1" />
                       <span className="text-muted-foreground">↔</span>
-                      <Input value={editEnglish} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditEnglish(e.target.value)} className="flex-1" />
+                      <Input placeholder="Englisch" value={editEnglish} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEditEnglish(e.target.value)} className="flex-1" />
                       <Button size="icon" variant="ghost" onClick={saveEdit}><Check className="h-4 w-4 text-green-500" /></Button>
                       <Button size="icon" variant="ghost" onClick={() => setEditingId(null)}><X className="h-4 w-4" /></Button>
                     </>
@@ -207,12 +234,24 @@ export function VocabListContent() {
                       <span className="text-xs text-muted-foreground shrink-0 hidden sm:block">
                         <SafeDate date={v.dateAdded} options={{ dateStyle: 'short' }} />
                       </span>
-                      <Button size="icon" variant="ghost" onClick={() => startEdit(v)} className="shrink-0">
-                        <Edit2 className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button size="icon" variant="ghost" onClick={() => handleDelete(v.id)} className="text-destructive shrink-0">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                      <div className="flex items-center shrink-0">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          onClick={() => handleSwap(v.id)}
+                          className="h-8 w-8 text-primary"
+                          aria-label="Deutsch und Englisch tauschen"
+                          title="Deutsch und Englisch tauschen"
+                        >
+                          <ArrowLeftRight className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button size="icon" variant="ghost" onClick={() => startEdit(v)} className="h-8 w-8" aria-label="Bearbeiten" title="Bearbeiten">
+                          <Edit2 className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button size="icon" variant="ghost" onClick={() => handleDelete(v.id)} className="h-8 w-8 text-destructive" aria-label="Löschen" title="Löschen">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </>
                   )}
                 </div>
